@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               PDL-EditDistance
-version:            0.04
+version:            0.05
 abstract:           Compute Wagner-Fischer edit distance and alignment matrices on PDLs
 author:
     - Bryan Jurish
