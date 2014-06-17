@@ -4,7 +4,7 @@
 #
 package PDL::EditDistance;
 
-@EXPORT_OK  = qw(   edit_costs  _edit_costs  edit_costs_static  edit_distance_full  _edit_distance_full PDL::PP _edit_distance_full  edit_align_full  _edit_align_full PDL::PP _edit_align_full  edit_distance_static  _edit_distance_static PDL::PP _edit_distance_static  edit_align_static  _edit_align_static PDL::PP _edit_align_static  align_op_insert1 PDL::PP align_op_insert1  align_op_insert2 PDL::PP align_op_insert2  align_op_match PDL::PP align_op_match  align_op_substitute PDL::PP align_op_substitute  align_ops  edit_bestpath  _edit_bestpath PDL::PP _edit_bestpath  edit_pathtrace  _edit_pathtrace PDL::PP _edit_pathtrace  edit_lcs  _edit_lcs PDL::PP _edit_lcs  lcs_backtrace  _lcs_backtrace PDL::PP _lcs_backtrace );
+@EXPORT_OK  = qw(   edit_costs  _edit_costs  edit_costs_static  edit_distance_full  _edit_distance_full PDL::PP _edit_distance_full  edit_align_full  _edit_align_full PDL::PP _edit_align_full  edit_distance_static  _edit_distance_static PDL::PP _edit_distance_static  edit_align_static  _edit_align_static PDL::PP _edit_align_static  align_op_insert1 PDL::PP align_op_insert1  align_op_insert2 PDL::PP align_op_insert2  align_op_match PDL::PP align_op_match  align_op_substitute PDL::PP align_op_substitute  align_op_insert  align_op_delete  align_ops  edit_bestpath  _edit_bestpath PDL::PP _edit_bestpath  edit_pathtrace  _edit_pathtrace PDL::PP _edit_pathtrace  edit_lcs  _edit_lcs PDL::PP _edit_lcs  lcs_backtrace  _lcs_backtrace PDL::PP _lcs_backtrace );
 %EXPORT_TAGS = (Func=>[@EXPORT_OK]);
 
 use PDL::Core;
@@ -13,7 +13,7 @@ use DynaLoader;
 
 
 
-   $PDL::EditDistance::VERSION = 0.05003;
+   $PDL::EditDistance::VERSION = 0.06;
    @ISA    = ( 'PDL::Exporter','DynaLoader' );
    push @PDL::Core::PP, __PACKAGE__;
    bootstrap PDL::EditDistance $VERSION;
@@ -43,12 +43,12 @@ PDL::EditDistance - Wagner-Fischer edit distance and alignment for PDLs.
 
  ##-------------------------------------------------------------
  ## Levenshtein distance
- $dist          = edit_distance_static($a,$b, 0,1,1);
- ($dist,$align) = edit_align_static($a,$b, 0,1,1);
+ $dist          = edit_distance_static($a,$b, 0,1,1,1);
+ ($dist,$align) = edit_align_static($a,$b, 0,1,1,1);
 
  ##-------------------------------------------------------------
  ## Wagner-Fischer distance
- @costs         = ($costMatch=0,$costInsert=1,$costSubstitute=2);
+ @costs         = ($costMatch=0,$costInsert=1,$costDelete=1,$costSubstitute=2);
  $dist          = edit_distance_static($a,$b, @costs);
  ($dist,$align) = edit_align_static($a,$b, @costs);
 
@@ -56,16 +56,17 @@ PDL::EditDistance - Wagner-Fischer edit distance and alignment for PDLs.
  ## General edit distance
  $costsMatch = random($a->nelem+1, $b->nelem+1);
  $costsIns   = random($a->nelem+1, $b->nelem+1);
+ $costsDel   = random($a->nelem+1, $b->nelem+1);
  $costsSubst = random($a->nelem+1, $b->nelem+1);
- @costs         = ($costsMatch,$costsIns,$costsSubst);
+ @costs         = ($costsMatch,$costsIns,$costDel,$costsSubst);
  $dist          = edit_distance_full($a,$b,@costs);
  ($dist,$align) = edit_align_full($a,$b,@costs);
 
  ##-------------------------------------------------------------
  ## Alignment
  $op_match = align_op_match();      ##-- constant
- $op_ins1  = align_op_insert1();    ##-- constant
- $op_ins2  = align_op_insert2();    ##-- constant
+ $op_del   = align_op_insert1();    ##-- constant
+ $op_ins   = align_op_insert2();    ##-- constant
  $op_subst = align_op_substitute(); ##-- constant
 
  ($apath,$bpath,$pathlen) = edit_bestpath($align);
@@ -127,7 +128,7 @@ sub _edit_pdl {
 =for sig
 
   Signature: (PDL::Type type; int N; int M;
-              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsSubst(N+1,M+1))
+              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsDel(N+1,M+1); [o]costsSubst(N+1,M+1))
 
 Convenience method.
 Ensures existence and proper dimensionality of cost matrices for inputs
@@ -150,7 +151,7 @@ sub edit_costs {
 =for sig
 
   Signature: (PDL::Type type; int N1; int M1;
-              [o]costsMatch(N1,M1); [o]costsIns(N1,M1); [o]costsSubst(N1,M1))
+              [o]costsMatch(N1,M1); [o]costsIns(N1,M1); [o]costsDel(N1,M1); [o]costsSubst(N1,M1))
 
 Low-level method.
 Ensures existence and proper dimensionality of cost matrices for inputs
@@ -159,10 +160,11 @@ of length N1-1 and M1-1.
 =cut
 
 sub _edit_costs {
-  #my ($type,$n1,$m1,$costsMatch,$costsIns,$costsSubst) = @_;
+  #my ($type,$n1,$m1,$costsMatch,$costsIns,$costsDel,$costsSubst) = @_;
   return (_edit_matrix(@_[0..2],$_[3]),
           _edit_matrix(@_[0..2],$_[4]),
-          _edit_matrix(@_[0..2],$_[5]));
+          _edit_matrix(@_[0..2],$_[5]),
+          _edit_matrix(@_[0..2],$_[6]));
 }
 
 ##-- $matrix = _edit_matrix($type,$dim0,$dim1,$mat)
@@ -183,16 +185,16 @@ sub _edit_matrix {
 
   Signature: (PDL::Type type; int N; int M;
               staticCostMatch(); staticCostIns(); staticCostSubst();
-              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsSubst(N+1,M+1))
+              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsDel(N+1,M+1); [o]costsSubst(N+1,M+1))
 
 Convenience method.
 
 =cut
 
 sub edit_costs_static {
-  #my ($type,$n,$m,$cMatch,$cIns,$cSubst,$costsMatch,$costsIns,$costsSubst) = @_;
-  my @costs = edit_costs(@_[0..2],@_[6..$#_]);
-  $costs[$_] .= $_[$_+3] foreach (0..2);
+  #my ($type,$n,$m, $cMatch,$cIns,$cDel,$cSubst, $costsMatch,$costsIns,$costsDel,$costsSubst) = @_;
+  my @costs = edit_costs(@_[0..2],@_[7..$#_]);
+  $costs[$_] .= $_[$_+3] foreach (0..3);
   return @costs;
 }
 
@@ -206,12 +208,12 @@ sub edit_costs_static {
 =for sig
 
   Signature: (a(N); b(M);
-              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsSubst(N+1,M+1);
+              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsDel(N+1,M+1); costsSubst(N+1,M+1);
               [o]dist(N+1,M+1); [o]align(N+1,M+1))
 
 Convenience method.
 Compute the edit distance matrix for inputs $a() and $b(), and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 
 =cut
@@ -228,12 +230,12 @@ sub edit_distance_full {
 
 =for sig
 
-  Signature: (a1(N1); b1(M1); costsMatch(N1,M1); costsIns(N1,M1); costsSubst(N1,M1); [o]dist(N1,M1))
+  Signature: (a1(N1); b1(M1); costsMatch(N1,M1); costsIns(N1,M1); costsDel(N1,M1); costsSubst(N1,M1); [o]dist(N1,M1))
 
 
 Low-level method.
 Compute the edit distance matrix for input PDLs $a1() and $b1() and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 
 The first elements of $a1() and $b1() are ignored.
 
@@ -263,12 +265,12 @@ It will set the bad-value flag of all output piddles if the flag is set for any 
 =for sig
 
   Signature: (a(N); b(M);
-              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsSubst(N+1,M+1);
+              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsDel(N+1,N+1); costsSubst(N+1,M+1);
               [o]dist(N+1,M+1); [o]align(N+1,M+1))
 
 Convenience method.
 Compute the edit distance and alignment matrices for inputs $a() and $b(), and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 
 =cut
@@ -285,12 +287,12 @@ sub edit_align_full {
 
 =for sig
 
-  Signature: (a1(N1); b1(M1); costsMatch(N1,M1); costsIns(N1,M1); costsSubst(N1,M1); [o]dist(N1,M1); byte [o]align(N1,M1))
+  Signature: (a1(N1); b1(M1); costsMatch(N1,M1); costsIns(N1,M1); costsDel(N1,M1); costsSubst(N1,M1); [o]dist(N1,M1); byte [o]align(N1,M1))
 
 
 Low-level method.
 Compute the edit distance and alignment matrix for input PDLs $a1() and $b1() and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 
 The first elements of $a1() and $b1() are ignored.
 
@@ -320,12 +322,12 @@ It will set the bad-value flag of all output piddles if the flag is set for any 
 =for sig
 
   Signature: (a(N); b(M);
-              staticCostMatch(); staticCostIns(); staticCostSubst();
+              staticCostMatch(); staticCostIns(); staticCostDel(); staticCostSubst();
               [o]dist(N+1,M+1))
 
 Convenience method.
 Compute the edit distance matrix for inputs $a() and $b() given
-a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), and $staticCostSubst()).
+a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), $staticCostDel(), and $staticCostSubst()).
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 Functionally equivalent to edit_distance_full($matches,@costs,$dist),
 but slightly faster.
@@ -344,12 +346,12 @@ sub edit_distance_static {
 
 =for sig
 
-  Signature: (a1(N1); b1(M1); costMatch(); costIns(); costSubst(); [o]dist(N1,M1))
+  Signature: (a1(N1); b1(M1); costMatch(); costIns(); costDel(); costSubst(); [o]dist(N1,M1))
 
 
 Low-level method.
 Compute the edit distance matrix for input PDLs $a1() and $b1() given a
-static cost schema @costs = ($costMatch(), $costIns(), $costSubst()).
+static cost schema @costs = ($costMatch(), $costIns(), $costDel(), $costSubst()).
 Functionally identitical to _edit_distance_matrix_full($matches,@costs,$dist),
 but slightly faster.
 
@@ -381,12 +383,12 @@ It will set the bad-value flag of all output piddles if the flag is set for any 
 =for sig
 
   Signature: (a(N); b(M);
-              staticCostMatch(); staticCostIns(); staticCostSubst();
+              staticCostMatch(); staticCostIns(); staticCostDel(); staticCostSubst();
               [o]dist(N+1,M+1); [o]align(N+1,M+1))
 
 Convenience method.
 Compute the edit distance and alignment matrices for inputs $a() and $b() given
-a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), and $staticCostSubst()).
+a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), $staticCostDel(), and $staticCostSubst()).
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 Functionally equivalent to edit_align_full($matches,@costs,$dist),
 but slightly faster.
@@ -405,12 +407,12 @@ sub edit_align_static {
 
 =for sig
 
-  Signature: (a1(N1); b1(M1); costMatch(); costIns(); costSubst(); [o]dist(N1,M1); byte [o]align(N1,M1))
+  Signature: (a1(N1); b1(M1); costMatch(); costIns(); costDel(); costSubst(); [o]dist(N1,M1); byte [o]align(N1,M1))
 
 
 Low-level method.
 Compute the edit distance and alignment matrices for input PDLs $a1() and $b1() given a
-static cost schema @costs = ($costMatch(), $costIns(), $costSubst()).
+static cost schema @costs = ($costMatch(), $costIns(), $costDel(), $costSubst()).
 Functionally identitical to _edit_distance_matrix_full($matches,@costs,$dist),
 but slightly faster.
 
@@ -547,6 +549,24 @@ It will set the bad-value flag of all output piddles if the flag is set for any 
 
 
 *align_op_substitute = \&PDL::align_op_substitute;
+
+
+
+
+=pod
+
+=head2 align_op_delete
+
+Alias for align_op_insert1()
+
+=head2 align_op_insert
+
+Alias for align_op_insert2()
+
+=cut
+
+*align_op_delete = \&align_op_insert1;
+*align_op_insert = \&align_op_insert2;
 
 
 
@@ -853,11 +873,12 @@ Bryan Jurish E<lt>moocow@cpan.orgE<gt>
 
 =head2 Copyright Policy
 
-Copyright (C) 2006, Bryan Jurish. All rights reserved.
+Copyright (C) 2006-2014, Bryan Jurish. All rights reserved.
 
 This package is free software, and entirely without warranty.
 You may redistribute it and/or modify it under the same terms
-as Perl itself.
+as Perl itself, either Perl 5.14.2, or at your option any later
+version of Perl 5.
 
 =head1 SEE ALSO
 

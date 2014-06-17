@@ -4,7 +4,7 @@
 ## Header Administrivia
 ##======================================================================
 
-our $VERSION = '0.05003';
+our $VERSION = '0.06';
 pp_setversion($VERSION);
 
 ##------------------------------------------------------
@@ -32,12 +32,12 @@ PDL::EditDistance - Wagner-Fischer edit distance and alignment for PDLs.
 
  ##-------------------------------------------------------------
  ## Levenshtein distance
- $dist          = edit_distance_static($a,$b, 0,1,1);
- ($dist,$align) = edit_align_static($a,$b, 0,1,1);
+ $dist          = edit_distance_static($a,$b, 0,1,1,1);
+ ($dist,$align) = edit_align_static($a,$b, 0,1,1,1);
 
  ##-------------------------------------------------------------
  ## Wagner-Fischer distance
- @costs         = ($costMatch=0,$costInsert=1,$costSubstitute=2);
+ @costs         = ($costMatch=0,$costInsert=1,$costDelete=1,$costSubstitute=2);
  $dist          = edit_distance_static($a,$b, @costs);
  ($dist,$align) = edit_align_static($a,$b, @costs);
 
@@ -45,16 +45,17 @@ PDL::EditDistance - Wagner-Fischer edit distance and alignment for PDLs.
  ## General edit distance
  $costsMatch = random($a->nelem+1, $b->nelem+1);
  $costsIns   = random($a->nelem+1, $b->nelem+1);
+ $costsDel   = random($a->nelem+1, $b->nelem+1);
  $costsSubst = random($a->nelem+1, $b->nelem+1);
- @costs         = ($costsMatch,$costsIns,$costsSubst);
+ @costs         = ($costsMatch,$costsIns,$costDel,$costsSubst);
  $dist          = edit_distance_full($a,$b,@costs);
  ($dist,$align) = edit_align_full($a,$b,@costs);
 
  ##-------------------------------------------------------------
  ## Alignment
  $op_match = align_op_match();      ##-- constant
- $op_ins1  = align_op_insert1();    ##-- constant
- $op_ins2  = align_op_insert2();    ##-- constant
+ $op_del   = align_op_insert1();    ##-- constant
+ $op_ins   = align_op_insert2();    ##-- constant
  $op_subst = align_op_substitute(); ##-- constant
 
  ($apath,$bpath,$pathlen) = edit_bestpath($align);
@@ -153,7 +154,7 @@ pp_addpm(<<'EOPM');
 =for sig
 
   Signature: (PDL::Type type; int N; int M;
-              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsSubst(N+1,M+1))
+              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsDel(N+1,M+1); [o]costsSubst(N+1,M+1))
 
 Convenience method.
 Ensures existence and proper dimensionality of cost matrices for inputs
@@ -181,7 +182,7 @@ pp_addpm(<<'EOPM');
 =for sig
 
   Signature: (PDL::Type type; int N1; int M1;
-              [o]costsMatch(N1,M1); [o]costsIns(N1,M1); [o]costsSubst(N1,M1))
+              [o]costsMatch(N1,M1); [o]costsIns(N1,M1); [o]costsDel(N1,M1); [o]costsSubst(N1,M1))
 
 Low-level method.
 Ensures existence and proper dimensionality of cost matrices for inputs
@@ -190,10 +191,11 @@ of length N1-1 and M1-1.
 =cut
 
 sub _edit_costs {
-  #my ($type,$n1,$m1,$costsMatch,$costsIns,$costsSubst) = @_;
+  #my ($type,$n1,$m1,$costsMatch,$costsIns,$costsDel,$costsSubst) = @_;
   return (_edit_matrix(@_[0..2],$_[3]),
           _edit_matrix(@_[0..2],$_[4]),
-          _edit_matrix(@_[0..2],$_[5]));
+          _edit_matrix(@_[0..2],$_[5]),
+          _edit_matrix(@_[0..2],$_[6]));
 }
 
 ##-- $matrix = _edit_matrix($type,$dim0,$dim1,$mat)
@@ -219,16 +221,16 @@ pp_addpm(<<'EOPM');
 
   Signature: (PDL::Type type; int N; int M;
               staticCostMatch(); staticCostIns(); staticCostSubst();
-              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsSubst(N+1,M+1))
+              [o]costsMatch(N+1,M+1); [o]costsIns(N+1,M+1); [o]costsDel(N+1,M+1); [o]costsSubst(N+1,M+1))
 
 Convenience method.
 
 =cut
 
 sub edit_costs_static {
-  #my ($type,$n,$m,$cMatch,$cIns,$cSubst,$costsMatch,$costsIns,$costsSubst) = @_;
-  my @costs = edit_costs(@_[0..2],@_[6..$#_]);
-  $costs[$_] .= $_[$_+3] foreach (0..2);
+  #my ($type,$n,$m, $cMatch,$cIns,$cDel,$cSubst, $costsMatch,$costsIns,$costsDel,$costsSubst) = @_;
+  my @costs = edit_costs(@_[0..2],@_[7..$#_]);
+  $costs[$_] .= $_[$_+3] foreach (0..3);
   return @costs;
 }
 
@@ -250,12 +252,12 @@ pp_addpm(<<'EOPM');
 =for sig
 
   Signature: (a(N); b(M);
-              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsSubst(N+1,M+1);
+              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsDel(N+1,M+1); costsSubst(N+1,M+1);
               [o]dist(N+1,M+1); [o]align(N+1,M+1))
 
 Convenience method.
 Compute the edit distance matrix for inputs $a() and $b(), and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 
 =cut
@@ -272,7 +274,7 @@ EOPM
 pp_add_exported('','_edit_distance_full');
 pp_def('_edit_distance_full',
        Pars => ('a1(N1); b1(M1);'
-                .' costsMatch(N1,M1); costsIns(N1,M1); costsSubst(N1,M1);'
+                .' costsMatch(N1,M1); costsIns(N1,M1); costsDel(N1,M1); costsSubst(N1,M1);'
 		.' [o]dist(N1,M1);'),
        Code =>
 ('
@@ -281,16 +283,16 @@ pp_def('_edit_distance_full',
   //-- initialize distance matrix: insertion costs
   $dist (N1=>0,M1=>0) = $costsMatch(N1=>0,M1=>0);  //-- BOS always matches
   for (i=1; i < $SIZE(N1); i++) {
-    $dist (N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costsIns(N1=>i,M1=>0);
+    $dist(N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costsDel(N1=>i,M1=>0);  //-- delete (insert1)
   }
   for (j=1; j < $SIZE(M1); j++) {
-    $dist( N1=>0,M1=>j) = $dist(N1=>0,M1=>j-1) + $costsIns(N1=>0,M1=>j);
+    $dist(N1=>0,M1=>j) = $dist(N1=>0,M1=>j-1) + $costsIns(N1=>0,M1=>j);  //-- insert (insert2)
   }
   //
   //-- compute distance
   for (i=1; i < $SIZE(N1); i++) {
     for (j=1; j < $SIZE(M1); j++) {
-      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costsIns(N1=>i,M1=>j);
+      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costsDel(N1=>i,M1=>j);
       $GENERIC(dist) cost_insert_2 = $dist(N1=>i,  M1=>j-1) + $costsIns(N1=>i,M1=>j);
       $GENERIC(dist) cost_subst = $dist(N1=>i-1,M1=>j-1);
       if ($a1(N1=>i)==$b1(M1=>j)) {
@@ -317,7 +319,7 @@ pp_def('_edit_distance_full',
 q(
 Low-level method.
 Compute the edit distance matrix for input PDLs $a1() and $b1() and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 
 The first elements of $a1() and $b1() are ignored.
 ),
@@ -341,12 +343,12 @@ pp_addpm(<<'EOPM');
 =for sig
 
   Signature: (a(N); b(M);
-              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsSubst(N+1,M+1);
+              costsMatch(N+1,M+1); costsIns(N+1,M+1); costsDel(N+1,N+1); costsSubst(N+1,M+1);
               [o]dist(N+1,M+1); [o]align(N+1,M+1))
 
 Convenience method.
 Compute the edit distance and alignment matrices for inputs $a() and $b(), and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 
 =cut
@@ -363,7 +365,7 @@ EOPM
 pp_add_exported('','_edit_align_full');
 pp_def('_edit_align_full',
        Pars => ('a1(N1); b1(M1);'
-                .' costsMatch(N1,M1); costsIns(N1,M1); costsSubst(N1,M1);'
+                .' costsMatch(N1,M1); costsIns(N1,M1); costsDel(N1,M1); costsSubst(N1,M1);'
 		.' [o]dist(N1,M1); byte [o]align(N1,M1);'),
       Code =>
 ('
@@ -373,7 +375,7 @@ pp_def('_edit_align_full',
   $dist (N1=>0,M1=>0) = $costsMatch(N1=>0,M1=>0);  //-- BOS always matches
   $align(N1=>0,M1=>0) = ALIGN_OP_MATCH;            //-- ... marked as "substitute"
   for (i=1; i < $SIZE(N1); i++) {
-    $dist (N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costsIns(N1=>i,M1=>0);
+    $dist (N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costsDel(N1=>i,M1=>0);
     $align(N1=>i,M1=>0) = ALIGN_OP_INSERT1;
   }
   for (j=1; j < $SIZE(M1); j++) {
@@ -384,7 +386,7 @@ pp_def('_edit_align_full',
   //-- compute distance
   for (i=1; i < $SIZE(N1); i++) {
     for (j=1; j < $SIZE(M1); j++) {
-      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costsIns(N1=>i,M1=>j);
+      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costsDel(N1=>i,M1=>j);
       $GENERIC(dist) cost_insert_2 = $dist(N1=>i,  M1=>j-1) + $costsIns(N1=>i,M1=>j);
       $GENERIC(dist) cost_subst    = $dist(N1=>i-1,M1=>j-1);
       char subst_op;
@@ -419,7 +421,7 @@ pp_def('_edit_align_full',
 q(
 Low-level method.
 Compute the edit distance and alignment matrix for input PDLs $a1() and $b1() and
-cost matrices $costsMatch(), $costsIns(), and $costsSubst().
+cost matrices $costsMatch(), $costsIns(), $costsDel(), and $costsSubst().
 
 The first elements of $a1() and $b1() are ignored.
 ),
@@ -443,12 +445,12 @@ pp_addpm(<<'EOPM');
 =for sig
 
   Signature: (a(N); b(M);
-              staticCostMatch(); staticCostIns(); staticCostSubst();
+              staticCostMatch(); staticCostIns(); staticCostDel(); staticCostSubst();
               [o]dist(N+1,M+1))
 
 Convenience method.
 Compute the edit distance matrix for inputs $a() and $b() given
-a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), and $staticCostSubst()).
+a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), $staticCostDel(), and $staticCostSubst()).
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 Functionally equivalent to edit_distance_full($matches,@costs,$dist),
 but slightly faster.
@@ -466,7 +468,7 @@ EOPM
 ## _edit_distance_static : get distance matrix from static cost schema
 pp_add_exported('','_edit_distance_static');
 pp_def('_edit_distance_static',
-       Pars => ('a1(N1); b1(M1); costMatch(); costIns(); costSubst();'
+       Pars => ('a1(N1); b1(M1); costMatch(); costIns(); costDel(); costSubst();'
 		.' [o]dist(N1,M1);'),
        Code =>
 ('
@@ -475,16 +477,16 @@ pp_def('_edit_distance_static',
   //-- initialize distance matrix: insertion costs
   $dist(N1=>0,M1=>0) = $costMatch();  //-- BOS always matches
   for (i=1; i < $SIZE(N1); i++) {
-    $dist(N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costIns(); //-- insert
+    $dist(N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costDel(); //-- delete (insert1)
   }
   for (j=1; j < $SIZE(M1); j++) {
-    $dist(N1=>0,M1=>j) = $dist(N1=>0,M1=>j-1) + $costIns(); //-- insert
+    $dist(N1=>0,M1=>j) = $dist(N1=>0,M1=>j-1) + $costIns(); //-- insert (insert2)
   }
   //
   //-- compute distance
   for (i=1; i < $SIZE(N1); i++) {
     for (j=1; j < $SIZE(M1); j++) {
-      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costIns();
+      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costDel();
       $GENERIC(dist) cost_insert_2 = $dist(N1=>i,  M1=>j-1) + $costIns();
       $GENERIC(dist) cost_subst    = $dist(N1=>i-1,M1=>j-1) + ($a1(N1=>i)==$b1(M1=>j)
 						       ? $costMatch()
@@ -507,7 +509,7 @@ pp_def('_edit_distance_static',
 q(
 Low-level method.
 Compute the edit distance matrix for input PDLs $a1() and $b1() given a
-static cost schema @costs = ($costMatch(), $costIns(), $costSubst()).
+static cost schema @costs = ($costMatch(), $costIns(), $costDel(), $costSubst()).
 Functionally identitical to _edit_distance_matrix_full($matches,@costs,$dist),
 but slightly faster.
 
@@ -532,12 +534,12 @@ pp_addpm(<<'EOPM');
 =for sig
 
   Signature: (a(N); b(M);
-              staticCostMatch(); staticCostIns(); staticCostSubst();
+              staticCostMatch(); staticCostIns(); staticCostDel(); staticCostSubst();
               [o]dist(N+1,M+1); [o]align(N+1,M+1))
 
 Convenience method.
 Compute the edit distance and alignment matrices for inputs $a() and $b() given
-a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), and $staticCostSubst()).
+a static cost schema @costs = ($staticCostMatch(), $staticCostIns(), $staticCostDel(), and $staticCostSubst()).
 $a() and $b() may be specified as PDLs, arrays of numbers, or as strings.
 Functionally equivalent to edit_align_full($matches,@costs,$dist),
 but slightly faster.
@@ -555,7 +557,7 @@ EOPM
 ## _edit_align_static : get distance & alignment matrices from static cost schema
 pp_add_exported('','_edit_align_static');
 pp_def('_edit_align_static',
-       Pars => ('a1(N1); b1(M1); costMatch(); costIns(); costSubst();'
+       Pars => ('a1(N1); b1(M1); costMatch(); costIns(); costDel(); costSubst();'
 		.' [o]dist(N1,M1); byte [o]align(N1,M1)'),
        Code =>
 ('
@@ -565,18 +567,18 @@ pp_def('_edit_align_static',
   $dist( N1=>0,M1=>0) = $costMatch();               //-- BOS always matches
   $align(N1=>0,M1=>0) = ALIGN_OP_MATCH;             //-- ... and is marked as "match"
   for (i=1; i < $SIZE(N1); i++) {
-    $dist (N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costIns(); //-- insert
+    $dist (N1=>i,M1=>0) = $dist(N1=>i-1,M1=>0) + $costDel(); //-- delete (insert1)
     $align(N1=>i,M1=>0) = ALIGN_OP_INSERT1;
   }
   for (j=1; j < $SIZE(M1); j++) {
-    $dist (N1=>0,M1=>j) = $dist(N1=>0,M1=>j-1) + $costIns(); //-- insert
+    $dist (N1=>0,M1=>j) = $dist(N1=>0,M1=>j-1) + $costIns(); //-- insert (insert2)
     $align(N1=>0,M1=>j) = ALIGN_OP_INSERT2;
   }
   //
   //-- compute distance
   for (i=1; i < $SIZE(N1); i++) {
     for (j=1; j < $SIZE(M1); j++) {
-      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costIns();
+      $GENERIC(dist) cost_insert_1 = $dist(N1=>i-1,M1=>j  ) + $costDel();
       $GENERIC(dist) cost_insert_2 = $dist(N1=>i,  M1=>j-1) + $costIns();
       $GENERIC(dist) cost_subst    = $dist(N1=>i-1,M1=>j-1);
       char subst_op;
@@ -611,7 +613,7 @@ pp_def('_edit_align_static',
 q(
 Low-level method.
 Compute the edit distance and alignment matrices for input PDLs $a1() and $b1() given a
-static cost schema @costs = ($costMatch(), $costIns(), $costSubst()).
+static cost schema @costs = ($costMatch(), $costIns(), $costDel(), $costSubst()).
 Functionally identitical to _edit_distance_matrix_full($matches,@costs,$dist),
 but slightly faster.
 
@@ -651,6 +653,28 @@ pp_def('align_op_substitute',
        Code=>'$a() = ALIGN_OP_SUBSTITUTE;',
        Doc => 'Alignment matrix value constant for substitution operations.',
       );
+
+
+pp_add_exported('','align_op_insert');
+pp_add_exported('','align_op_delete');
+pp_addpm(<<'EOPM');
+
+=pod
+
+=head2 align_op_delete
+
+Alias for align_op_insert1()
+
+=head2 align_op_insert
+
+Alias for align_op_insert2()
+
+=cut
+
+*align_op_delete = \&align_op_insert1;
+*align_op_insert = \&align_op_insert2;
+
+EOPM
 
 
 pp_add_exported('','align_ops');
@@ -1056,11 +1080,12 @@ Bryan Jurish E<lt>moocow@cpan.orgE<gt>
 
 =head2 Copyright Policy
 
-Copyright (C) 2006, Bryan Jurish. All rights reserved.
+Copyright (C) 2006-2014, Bryan Jurish. All rights reserved.
 
 This package is free software, and entirely without warranty.
 You may redistribute it and/or modify it under the same terms
-as Perl itself.
+as Perl itself, either Perl 5.14.2, or at your option any later
+version of Perl 5.
 
 =head1 SEE ALSO
 
